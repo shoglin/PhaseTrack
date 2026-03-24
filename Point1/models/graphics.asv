@@ -1,0 +1,123 @@
+%% Скрипт для построения фазовых траекторий с правильными настройками солвера
+clear all
+close all
+clc
+
+%% Настройки
+model_name = 'my_system';  % Имя вашей модели
+
+% Открываем модель
+if ~bdIsLoaded(model_name)
+    load_system(model_name);
+end
+
+%% НАСТРОЙКИ СОЛВЕРА ДЛЯ ЖЕСТКИХ СИСТЕМ
+% Устанавливаем солвер для жестких систем
+set_param(model_name, 'Solver', 'ode15s');  % ode15s для жестких систем
+set_param(model_name, 'MaxStep', '0.01');   % Максимальный шаг
+set_param(model_name, 'MinStep', '1e-10');  % Минимальный шаг
+set_param(model_name, 'RelTol', '1e-4');    % Относительная точность (увеличиваем)
+set_param(model_name, 'AbsTol', '1e-6');    % Абсолютная точность
+
+%% Задаем начальные условия (уменьшаем амплитуды)
+initial_conditions = [
+    0.0,   0.1;     % Меньшие значения
+    0,   0.2;
+    0.1, 0.01;
+    -0.1, 0.1;
+    0,   -0.1;
+    0.2, 0.05;
+    -0.2, -0.5;
+    0,   0.3;
+    0.15, 0.15;
+    -0.15, -0.15
+];
+
+% Цвета
+colors = {'b', 'r', 'g', 'm', 'c', 'k', 'y', [0.5 0 0.5], [0 0.5 0.5], [0.5 0.5 0]};
+
+% Время симуляции
+sim_time = 5;  % Уменьшаем время
+
+%% Создаем фигуру
+figure('Name', 'Фазовый портрет', 'Position', [100, 100, 900, 700])
+hold on
+grid on
+
+%% Массив для данных
+trajectories_data = cell(size(initial_conditions, 1), 3);
+success_count = 0;
+
+%% Цикл по начальным условиям
+for i = 1:size(initial_conditions, 1)
+    x0 = initial_conditions(i, 1);
+    v0 = initial_conditions(i, 2);
+    
+    fprintf('Запуск симуляции %d/%d: x0 = %.3f, v0 = %.3f\n', i, size(initial_conditions, 1), x0, v0);
+    
+    try
+        % Устанавливаем начальные условия
+        set_param([model_name '/Integrator'], 'InitialCondition', num2str(x0));
+        set_param([model_name '/Integrator1'], 'InitialCondition', num2str(v0));
+        
+        % Запускаем симуляцию
+        simOut = sim(model_name, 'StopTime', num2str(sim_time), ...
+                               'SaveTime', 'on', ...
+                               'SaveOutput', 'on', ...
+                               'OutputSaveName', 'yout');
+        
+        % Извлекаем данные
+        if isfield(simOut, 'x') && isfield(simOut, 'y')
+            x_data = simOut.x;
+            y_data = simOut.y;
+        elseif isfield(simOut, 'yout')
+            if size(simOut.yout, 2) >= 2
+                x_data = simOut.yout(:, 1);
+                y_data = simOut.yout(:, 2);
+            else
+                error('Недостаточно выходов');
+            end
+        else
+            error('Нет данных');
+        end
+        
+        % Сохраняем успешные данные
+        if length(x_data) > 1 && all(isfinite(x_data)) && all(isfinite(y_data))
+            success_count = success_count + 1;
+            trajectories_data{success_count, 1} = x_data;
+            trajectories_data{success_count, 2} = y_data;
+            trajectories_data{success_count, 3} = [x0, v0];
+            
+            % Строим траекторию
+            color_idx = mod(success_count-1, length(colors)) + 1;
+            plot(x_data, y_data, colors{color_idx}, 'LineWidth', 1.5)
+            plot(x_data(1), y_data(1), [colors{color_idx}, 'o'], 'MarkerSize', 8, 'MarkerFaceColor', colors{color_idx})
+            plot(x_data(end), y_data(end), [colors{color_idx}, 's'], 'MarkerSize', 6)
+            
+            fprintf('  -> Успешно! Траектория %d построена\n', success_count);
+        end
+        
+    catch ME
+        fprintf('  -> Ошибка: %s\n', ME.message);
+        continue;
+    end
+end
+
+%% Оформление
+hold off
+xlabel('Положение (x)', 'FontSize', 12)
+ylabel('Скорость (v)', 'FontSize', 12)
+title('Фазовый портрет системы', 'FontSize', 14)
+grid on
+
+% Легенда
+if success_count > 0
+    legend_str = cell(success_count, 1);
+    for i = 1:success_count
+        legend_str{i} = sprintf('x_0=%.2f, v_0=%.2f', trajectories_data{i, 3}(1), trajectories_data{i, 3}(2));
+    end
+    legend(legend_str, 'Location', 'best')
+end
+
+fprintf('\n=== Готово! ===\n');
+fprintf('Успешно построено %d из %d траекторий\n', success_count, size(initial_conditions, 1));
